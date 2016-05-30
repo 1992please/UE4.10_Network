@@ -34,6 +34,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Net")
 	void HostGame();
 
+	UFUNCTION(BlueprintCallable, Category = "Net")
+	void DestroySessionAndLeaveGame();
+
 	UPROPERTY(BlueprintReadWrite, Category = "Net")
 	bool EnableLAN;
 
@@ -145,4 +148,17 @@ private:
 	*	@param bWasSuccessful true if the async action completed without error, false if there was an error
 	*/
 	void OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
+
+	/** Delegate for destroying a session */
+	FOnDestroySessionCompleteDelegate OnDestroySessionCompleteDelegate;
+	/** Handle to registered delegate for destroying a session */
+	FDelegateHandle OnDestroySessionCompleteDelegateHandle;
+
+	/**
+	* Delegate fired when a destroying an online session has completed
+	*
+	* @param SessionName the name of the session this callback is for
+	* @param bWasSuccessful true if the async action completed without error, false if there was an error
+	*/
+	virtual void OnDestroySessionComplete(FName SessionName, bool bWasSuccessful);
 };

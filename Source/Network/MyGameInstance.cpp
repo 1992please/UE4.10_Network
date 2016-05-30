@@ -13,6 +13,8 @@ UMyGameInstance::UMyGameInstance()
 	OnFindSessionsCompleteDelegate = FOnFindSessionsCompleteDelegate::CreateUObject(this, &UMyGameInstance::OnFindSessionsComplete);
 	/** Bind function for JOINING a Session */
 	OnJoinSessionCompleteDelegate = FOnJoinSessionCompleteDelegate::CreateUObject(this, &UMyGameInstance::OnJoinSessionComplete);
+	/** Bind function for DESTROYING a Session */
+	OnDestroySessionCompleteDelegate = FOnDestroySessionCompleteDelegate::CreateUObject(this, &UMyGameInstance::OnDestroySessionComplete);
 
 
 }
@@ -55,14 +57,17 @@ void UMyGameInstance::ShowMainMenu()
 
 void UMyGameInstance::ShowServerList()
 {
-	ULocalPlayer* const Player = GetFirstGamePlayer();
+	//ULocalPlayer* const Player = GetFirstGamePlayer();
 
-	FindSessions(Player->GetPreferredUniqueNetId(), true, true);
+	//FindSessions(Player->GetPreferredUniqueNetId(), true, true);
+
+	ChangeWidget(ServerListWidget);
+
 }
 
 void UMyGameInstance::ShowLoadingScreen()
 {
-
+	ChangeWidget(LoadingScreenWidget);
 }
 
 void UMyGameInstance::HostGame()
@@ -72,13 +77,20 @@ void UMyGameInstance::HostGame()
 
 	// Call our custom HostSession function. GameSessionName is a GameInstance variable
 	HostSession(Player->GetPreferredUniqueNetId(), true, true, 2);
+}
 
-	FInputModeGameOnly InputMode;
-
-	APlayerController* PlayerController = GetFirstLocalPlayerController();
-	if (PlayerController)
+void UMyGameInstance::DestroySessionAndLeaveGame()
+{
+	IOnlineSubsystem* OnlineSub = IOnlineSubsystem::Get();
+	if (OnlineSub)
 	{
-		PlayerController->SetInputMode(InputMode);
+		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
+
+		if (Sessions.IsValid())
+		{
+			Sessions->AddOnDestroySessionCompleteDelegate_Handle(OnDestroySessionCompleteDelegate);
+			Sessions->DestroySession(GameSessionName);
+		}
 	}
 }
 
@@ -317,6 +329,29 @@ void UMyGameInstance::OnJoinSessionComplete(FName SessionName, EOnJoinSessionCom
 				// Finally call the ClienTravel. If you want, you could print the TravelURL to see
 				// how it really looks like
 				PlayerController->ClientTravel(TravelURL, ETravelType::TRAVEL_Absolute);
+			}
+		}
+	}
+}
+
+void UMyGameInstance::OnDestroySessionComplete(FName SessionName, bool bWasSuccessful)
+{
+	GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Red, FString::Printf(TEXT("OnDestroySessionComplete %s, %d"), *SessionName.ToString(), bWasSuccessful));
+
+	// Get the OnlineSubsystem we want to work with
+	IOnlineSubsystem* OnlineSub = IOnlineSubsystem::Get();
+	if (OnlineSub)
+	{
+		// Get the SessionInterface from the OnlineSubsystem
+		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
+		if (Sessions.IsValid())
+		{
+			// Clear the Delegate
+			Sessions->ClearOnDestroySessionCompleteDelegate_Handle(OnDestroySessionCompleteDelegateHandle);
+			// If it was successful, we just load another level (could be a MainMenu!)
+			if (bWasSuccessful)
+			{
+				UGameplayStatics::OpenLevel(GetWorld(), "MainMenu", true);
 			}
 		}
 	}
