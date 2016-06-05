@@ -5,6 +5,14 @@
 
 class UInputComponent;
 
+UENUM()
+enum class ETask : uint8
+{
+	None,
+	Fire,
+	Reload
+};
+
 UCLASS(config=Game)
 class ANetworkCharacter : public ACharacter
 {
@@ -21,7 +29,16 @@ class ANetworkCharacter : public ACharacter
 	/** First person camera */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	class UCameraComponent* FirstPersonCameraComponent;
+
+	UPROPERTY(ReplicatedUsing=OnRep_Task)
+	ETask Task;
+
+	FTimerHandle TimerHandle_Task;
 public:
+
+	UPROPERTY(ReplicatedUsing=OnRep_Health)
+	float Health;
+
 	ANetworkCharacter();
 
 	/** Base turn rate, in deg/sec. Other scaling may affect final turn rate. */
@@ -49,9 +66,17 @@ public:
 	class UAnimMontage* FireAnimation;
 
 protected:
-	
+	void PerformTask(ETask NewTask);
+
+	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerPerformTask(ETask NewTask);
+
 	/** Fires a projectile. */
 	void OnFire();
+
+	void StartFiring();
+
+	void StopFiring();
 
 	/** Handles moving forward/backward */
 	void MoveForward(float Val);
@@ -98,6 +123,18 @@ protected:
 	bool EnableTouchscreenMovement(UInputComponent* InputComponent);
 
 public:
+
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser);
+
+	void Tick(float DeltaTime) override;
+
+	UFUNCTION()
+	void OnRep_Task();
+
+	UFUNCTION()
+	void OnRep_Health();
+
+	FRotator GetViewRotation() const override;
 	/** Returns Mesh1P subobject **/
 	FORCEINLINE class USkeletalMeshComponent* GetMesh1P() const { return Mesh1P; }
 	/** Returns FirstPersonCameraComponent subobject **/

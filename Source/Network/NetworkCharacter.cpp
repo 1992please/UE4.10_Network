@@ -5,6 +5,9 @@
 #include "NetworkProjectile.h"
 #include "Animation/AnimInstance.h"
 #include "GameFramework/InputSettings.h"
+#include "UnrealNetwork.h"
+#include "NetworkPlayerController.h"
+
 
 DEFINE_LOG_CATEGORY_STATIC(LogFPChar, Warning, All);
 
@@ -16,6 +19,7 @@ ANetworkCharacter::ANetworkCharacter()
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 
+
 	// set our turn rates for input
 	BaseTurnRate = 45.f;
 	BaseLookUpRate = 45.f;
@@ -24,18 +28,18 @@ ANetworkCharacter::ANetworkCharacter()
 	FirstPersonCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCameraComponent->AttachParent = GetCapsuleComponent();
 	FirstPersonCameraComponent->RelativeLocation = FVector(0, 0, 64.f); // Position the camera
-	FirstPersonCameraComponent->bUsePawnControlRotation = true;
+	//FirstPersonCameraComponent->bUsePawnControlRotation = true;
 
 	// Create a mesh component that will be used when being viewed from a '1st person' view (when controlling this pawn)
 	Mesh1P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("CharacterMesh1P"));
-	Mesh1P->SetOnlyOwnerSee(true);
+	//Mesh1P->SetOnlyOwnerSee(true);
 	Mesh1P->AttachParent = FirstPersonCameraComponent;
 	Mesh1P->bCastDynamicShadow = false;
 	Mesh1P->CastShadow = false;
 
 	// Create a gun mesh component
 	FP_Gun = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FP_Gun"));
-	FP_Gun->SetOnlyOwnerSee(true);			// only the owning player will see this mesh
+	//FP_Gun->SetOnlyOwnerSee(true);			// only the owning player will see this mesh
 	FP_Gun->bCastDynamicShadow = false;
 	FP_Gun->CastShadow = false;
 	FP_Gun->AttachTo(Mesh1P, TEXT("GripPoint"), EAttachLocation::SnapToTargetIncludingScale, true);
@@ -46,6 +50,7 @@ ANetworkCharacter::ANetworkCharacter()
 
 	// Note: The ProjectileClass and the skeletal mesh/anim blueprints for Mesh1P are set in the
 	// derived blueprint asset named MyCharacter (to avoid direct content references in C++)
+	Health = 100.f;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -62,7 +67,8 @@ void ANetworkCharacter::SetupPlayerInputComponent(class UInputComponent* InputCo
 	//InputComponent->BindTouch(EInputEvent::IE_Pressed, this, &ANetworkCharacter::TouchStarted);
 	if( EnableTouchscreenMovement(InputComponent) == false )
 	{
-		InputComponent->BindAction("Fire", IE_Pressed, this, &ANetworkCharacter::OnFire);
+		InputComponent->BindAction("Fire", IE_Pressed, this, &ANetworkCharacter::StartFiring);
+		InputComponent->BindAction("Fire", IE_Released, this, &ANetworkCharacter::StopFiring);
 	}
 	
 	InputComponent->BindAxis("MoveForward", this, &ANetworkCharacter::MoveForward);
@@ -76,13 +82,26 @@ void ANetworkCharacter::SetupPlayerInputComponent(class UInputComponent* InputCo
 	InputComponent->BindAxis("LookUp", this, &APawn::AddControllerPitchInput);
 	InputComponent->BindAxis("LookUpRate", this, &ANetworkCharacter::LookUpAtRate);
 }
+void ANetworkCharacter::StartFiring()
+{
+	PerformTask(ETask::Fire);
+}
+
+void ANetworkCharacter::StopFiring()
+{
+	PerformTask(ETask::None);
+}
 
 void ANetworkCharacter::OnFire()
 { 
+	if (Task != ETask::Fire)
+	{
+		return;
+	}
 	// try and fire a projectile
 	if (ProjectileClass != NULL)
 	{
-		const FRotator SpawnRotation = GetControlRotation();
+		const FRotator SpawnRotation = GetViewRotation();
 		// MuzzleOffset is in camera space, so transform it to world space before offsetting from the character location to find the final muzzle position
 		const FVector SpawnLocation = GetActorLocation() + SpawnRotation.RotateVector(GunOffset);
 
@@ -111,6 +130,7 @@ void ANetworkCharacter::OnFire()
 		}
 	}
 
+	GetWorldTimerManager().SetTimer(TimerHandle_Task, this, &ANetworkCharacter::OnFire, 0.1f, false);
 }
 
 void ANetworkCharacter::BeginTouch(const ETouchIndex::Type FingerIndex, const FVector Location)
@@ -214,4 +234,94 @@ bool ANetworkCharacter::EnableTouchscreenMovement(class UInputComponent* InputCo
 		InputComponent->BindTouch(EInputEvent::IE_Repeat, this, &ANetworkCharacter::TouchUpdate);
 	}
 	return bResult;
+}
+
+void ANetworkCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+	FirstPersonCameraComponent->SetWorldRotation(GetViewRotation());
+}
+
+FRotator ANetworkCharacter::GetViewRotation() const
+{
+	if (Controller)
+	{
+		return Controller->GetControlRotation();
+	}
+	return FRotator(RemoteViewPitch/255.f * 366.f, GetActorRotation().Yaw, 0.f);
+}
+
+void ANetworkCharacter::OnRep_Task()
+{
+	switch (Task)
+	{
+		case ETask::None:
+			break;
+		case ETask::Fire:
+		{
+			OnFire();
+		}
+			break;
+		case ETask::Reload:
+		{
+
+		}
+			break;
+		default:
+			break;
+	}
+}
+
+void ANetworkCharacter::OnRep_Health()
+{
+	FirstPersonCameraComponent->PostProcessSettings.SceneFringeIntensity = 5.f - Health * 0.05f;
+}
+
+void ANetworkCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(ANetworkCharacter, Task);
+	DOREPLIFETIME(ANetworkCharacter, Health);
+}
+
+void ANetworkCharacter::PerformTask(ETask NewTask)
+{
+	// incase this was the client call the server
+	if (GetNetMode() == NM_Client)
+	{
+		ServerPerformTask(NewTask);
+		return;
+	}
+	
+	// in case this was the server
+	Task = NewTask;
+	OnRep_Task();
+}
+
+void ANetworkCharacter::ServerPerformTask_Implementation(ETask NewTask)
+{
+	PerformTask(NewTask);
+	//UGameplayStatics::ApplyDamage
+}
+
+bool ANetworkCharacter::ServerPerformTask_Validate(ETask NewTask)
+{
+	return true;
+}
+
+float ANetworkCharacter::TakeDamage(float DamageAmount, struct FDamageEvent const & DamageEvent, class AController * EventInstigator, AActor * DamageCauser)
+{
+	Health -= DamageAmount;
+	if (Health <= 0.f)
+	{
+		ANetworkPlayerController* PC = Cast<ANetworkPlayerController>(Controller);
+		if (PC)
+		{
+			PC->OnKilled();
+		}
+		OnRep_Health();
+		Destroy();
+	}
+	return DamageAmount;
 }

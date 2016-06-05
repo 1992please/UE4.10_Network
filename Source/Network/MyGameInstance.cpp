@@ -15,8 +15,6 @@ UMyGameInstance::UMyGameInstance()
 	OnJoinSessionCompleteDelegate = FOnJoinSessionCompleteDelegate::CreateUObject(this, &UMyGameInstance::OnJoinSessionComplete);
 	/** Bind function for DESTROYING a Session */
 	OnDestroySessionCompleteDelegate = FOnDestroySessionCompleteDelegate::CreateUObject(this, &UMyGameInstance::OnDestroySessionComplete);
-
-
 }
 
 void UMyGameInstance::ChangeWidget(TSubclassOf<UUserWidget> NewWidgetClass)
@@ -68,6 +66,18 @@ void UMyGameInstance::ShowServerList()
 void UMyGameInstance::ShowLoadingScreen()
 {
 	ChangeWidget(LoadingScreenWidget);
+
+	if (CurrentWidget)
+	{
+		FInputModeUIOnly InputMode;
+		InputMode.SetWidgetToFocus(CurrentWidget->GetCachedWidget());
+
+		APlayerController* PlayerController = GetFirstLocalPlayerController();
+		if (PlayerController)
+		{
+			PlayerController->SetInputMode(InputMode);
+		}
+	}
 }
 
 void UMyGameInstance::HostGame()
@@ -167,7 +177,6 @@ void UMyGameInstance::OnCreateSessionComplete(FName SessionName, bool bWasSucces
 		}
 
 	}
-
 }
 
 void UMyGameInstance::OnStartOnlineGameComplete(FName SessionName, bool bWasSuccessful)
@@ -190,7 +199,7 @@ void UMyGameInstance::OnStartOnlineGameComplete(FName SessionName, bool bWasSucc
 	// If the start was successful, we can open a NewMap if we want. Make sure to use "listen" as a parameter!
 	if (bWasSuccessful)
 	{
-		UGameplayStatics::OpenLevel(GetWorld(), "FirstPersonExampleMap", true, "listen");
+		UGameplayStatics::OpenLevel(GetWorld(), "FirstPersonExampleMap", true, "listen?MaxNumPlayers=2");
 	}
 }
 
